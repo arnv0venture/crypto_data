@@ -4,9 +4,14 @@ import asyncio
 import json
 import requests
 import pandas as pd
+from crypto_engine.config import symbol
 import websockets
+import time
+
 
 from utils.storage import get_trade_path
+
+FLUSH_INTERVAL = 20
 
 SYMBOL = "BTCUSDT"
 EXCHANGE = "binance"
@@ -37,6 +42,7 @@ asks = {
 
 records = []
 
+last_flush = time.time()
 
 async def collect_orderbook():
 
@@ -91,27 +97,31 @@ async def collect_orderbook():
                 "asks": best_asks
             })
 
-            if len(records) >= 1000:
+            if time.time() - last_flush >= FLUSH_INTERVAL:
 
-                df = pd.DataFrame(records)
+                if records:
+                
+                    df = pd.DataFrame(records)
 
-                filename = get_trade_path(
-                    EXCHANGE,
-                    "orderbook",
-                    SYMBOL
-                )
+                    filename = get_trade_path(
+                        EXCHANGE,
+                        "orderbook",
+                        SYMBOL
+                    )
 
-                df.to_parquet(
-                    filename,
-                    compression="snappy",
-                    index=False
-                )
+                    df.to_parquet(
+                        filename,
+                        compression="snappy",
+                        index=False
+                    )
 
-                print(
-                    f"Saved {len(df)} orderbooks"
-                )
+                    print(
+                        f"{SYMBOL}: saved "
+                        f"{len(df)} orderbook updates"
+                    )
 
-                records.clear()
+                    records.clear()
 
+                    last_flush = time.time()
 
 asyncio.run(collect_orderbook())

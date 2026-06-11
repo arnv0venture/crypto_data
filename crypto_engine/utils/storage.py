@@ -27,7 +27,7 @@ def get_trade_path(
     )
 
     timestamp = now.strftime(
-        "%H%M%S"
+        "%Y%m%d_%H%M%S"
     )
-
+    
     return path / f"{timestamp}.parquet"
