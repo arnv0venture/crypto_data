@@ -1,101 +1,117 @@
+# collectors/orderbook.py
+
 import asyncio
-import websockets
 import json
 import requests
 import pandas as pd
-from datetime import datetime
-import os
+import websockets
 
-os.makedirs("data", exist_ok=True)
+from utils.storage import get_path
 
-# -----------------------------
-# STEP 1: GET SNAPSHOT
-# -----------------------------
-url = "https://api.binance.com/api/v3/depth?symbol=BTCUSDT&limit=1000"
-snapshot = requests.get(url).json()
+SYMBOL = "BTCUSDT"
+EXCHANGE = "binance"
 
-last_update_id = snapshot['lastUpdateId']
+SNAPSHOT_URL = (
+    f"https://api.binance.com/api/v3/depth"
+    f"?symbol={SYMBOL}&limit=1000"
+)
 
-bids = {float(price): float(qty) for price, qty in snapshot['bids']}
-asks = {float(price): float(qty) for price, qty in snapshot['asks']}
+WS_URL = (
+    f"wss://stream.binance.com:9443/ws/"
+    f"{SYMBOL.lower()}@depth@100ms"
+)
 
-print("Snapshot loaded")
+snapshot = requests.get(SNAPSHOT_URL).json()
 
-# -----------------------------
-# STORAGE
-# -----------------------------
+last_update_id = snapshot["lastUpdateId"]
+
+bids = {
+    float(p): float(q)
+    for p, q in snapshot["bids"]
+}
+
+asks = {
+    float(p): float(q)
+    for p, q in snapshot["asks"]
+}
+
 records = []
 
-# -----------------------------
-# STEP 2: WEBSOCKET
-# -----------------------------
-WS_URL = "wss://stream.binance.com:9443/ws/btcusdt@depth@100ms"
 
-async def process():
+async def collect_orderbook():
+
     global last_update_id
 
     async with websockets.connect(WS_URL) as ws:
+
         while True:
+
             msg = await ws.recv()
+
             data = json.loads(msg)
 
-            # Ignore outdated updates
-            if data['u'] <= last_update_id:
+            if data["u"] <= last_update_id:
                 continue
 
-            # Update last_update_id
-            last_update_id = data['u']
+            last_update_id = data["u"]
 
-            # -----------------------------
-            # APPLY BIDS
-            # -----------------------------
-            for price, qty in data['b']:
-                price = float(price)
-                qty = float(qty)
+            for p, q in data["b"]:
 
-                if qty == 0:
-                    bids.pop(price, None)
+                p = float(p)
+                q = float(q)
+
+                if q == 0:
+                    bids.pop(p, None)
                 else:
-                    bids[price] = qty
+                    bids[p] = q
 
-            # -----------------------------
-            # APPLY ASKS
-            # -----------------------------
-            for price, qty in data['a']:
-                price = float(price)
-                qty = float(qty)
+            for p, q in data["a"]:
 
-                if qty == 0:
-                    asks.pop(price, None)
+                p = float(p)
+                q = float(q)
+
+                if q == 0:
+                    asks.pop(p, None)
                 else:
-                    asks[price] = qty
+                    asks[p] = q
 
-            # -----------------------------
-            # EXTRACT TOP 5
-            # -----------------------------
-            best_bids = sorted(bids.items(), reverse=True)[:5]
-            best_asks = sorted(asks.items())[:5]
+            best_bids = sorted(
+                bids.items(),
+                reverse=True
+            )[:10]
 
-            record = {
-                "timestamp": data['E'],
+            best_asks = sorted(
+                asks.items()
+            )[:10]
+
+            records.append({
+                "timestamp": data["E"],
+                "symbol": SYMBOL,
                 "bids": best_bids,
                 "asks": best_asks
-            }
+            })
 
-            records.append(record)
+            if len(records) >= 1000:
 
-            # -----------------------------
-            # SAVE DATA
-            # -----------------------------
-            if len(records) >= 500:
                 df = pd.DataFrame(records)
-                filename = f"data/recon_orderbook_{datetime.now().date()}.parquet"
-                if os.path.exists(filename) and os.path.getsize(filename) > 0:
-                    existing_df = pd.read_parquet(filename)
-                    df = pd.concat([existing_df, df], ignore_index=True)
-                df.to_parquet(filename, index=False)
+
+                filename = get_path(
+                    EXCHANGE,
+                    "orderbook",
+                    SYMBOL
+                )
+
+                df.to_parquet(
+                    filename,
+                    compression="snappy",
+                    index=False
+                )
+
+                print(
+                    f"Saved {len(df)} orderbooks"
+                )
+
                 records.clear()
 
-            print("Updated OB", best_bids[0], best_asks[0])
 
-asyncio.run(process())
+asyncio.run(collect_orderbook())

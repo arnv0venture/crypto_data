@@ -1,38 +1,81 @@
+# collectors/trades.py
+
 import asyncio
 import websockets
 import json
 import pandas as pd
-from datetime import datetime
-import os
+import duckdb
 
-os.makedirs("data", exist_ok=True)
+from utils.storage import get_path
 
-url = "wss://stream.binance.com:9443/ws/btcusdt@trade"
+SYMBOL = "BTCUSDT"
+EXCHANGE = "binance"
 
-trades = []
+WS_URL = f"wss://stream.binance.com:9443/ws/{SYMBOL.lower()}@trade"
+
+BUFFER_SIZE = 5000
+
+buffer = []
+
+con = duckdb.connect("database/crypto.duckdb")
+
+con.execute("""
+CREATE TABLE IF NOT EXISTS trades(
+    timestamp BIGINT,
+    symbol VARCHAR,
+    price DOUBLE,
+    qty DOUBLE
+)
+""")
+
 
 async def collect_trades():
-    async with websockets.connect(url) as ws:
+
+    async with websockets.connect(WS_URL) as ws:
+
         while True:
+
             msg = await ws.recv()
+
             data = json.loads(msg)
 
             trade = {
-                "timestamp": data['T'],
-                "price": float(data['p']),
-                "qty": float(data['q'])
+                "timestamp": data["T"],
+                "symbol": SYMBOL,
+                "price": float(data["p"]),
+                "qty": float(data["q"])
             }
 
-            trades.append(trade)
+            buffer.append(trade)
 
-            # Save every 1000 trades
-            if len(trades) >= 1000:
-                df = pd.DataFrame(trades)
-                filename = f"data/trades_{datetime.now().date()}.parquet"
-                if os.path.exists(filename) and os.path.getsize(filename) > 0:
-                    existing_df = pd.read_parquet(filename)
-                    df = pd.concat([existing_df, df], ignore_index=True)
-                df.to_parquet(filename, index=False)
-                trades.clear()
+            if len(buffer) >= BUFFER_SIZE:
+
+                df = pd.DataFrame(buffer)
+
+                con.register("temp_df", df)
+
+                con.execute("""
+                    INSERT INTO trades
+                    SELECT * FROM temp_df
+                """)
+
+                filename = get_path(
+                    EXCHANGE,
+                    "trades",
+                    SYMBOL
+                )
+
+                df.to_parquet(
+                    filename,
+                    compression="snappy",
+                    index=False
+                )
+
+                print(
+                    f"Saved {len(df)} trades"
+                )
+
+                buffer.clear()
+
 
 asyncio.run(collect_trades())
