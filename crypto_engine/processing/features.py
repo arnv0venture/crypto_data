@@ -56,4 +56,15 @@ df["microprice"] = (
     )
 )
 
-print(df.head())
+feature_cols = [
+    "timestamp",
+    "best_bid",
+    "best_ask",
+    "mid_price",
+    "spread",
+    "imbalance",
+    "microprice"
+]
+
+print(df[feature_cols].head(20))
+print(df.isnull().sum())
