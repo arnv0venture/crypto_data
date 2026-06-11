@@ -43,4 +43,4 @@ orderbook['imbalance'] = (
 # -------------------------
 # OUTPUT CHECK
 # -------------------------
-print(orderbook[['timestamp','best_bid','best_ask','mid_price','spread','imbalance']].head(50))
+print(orderbook[['timestamp','best_bid','best_ask','mid_price','spread','imbalance']].head(51))
