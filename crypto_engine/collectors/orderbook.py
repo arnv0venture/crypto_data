@@ -6,7 +6,7 @@ import requests
 import pandas as pd
 import websockets
 
-from utils.storage import get_path
+from utils.storage import get_trade_path
 
 SYMBOL = "BTCUSDT"
 EXCHANGE = "binance"
@@ -95,7 +95,7 @@ async def collect_orderbook():
 
                 df = pd.DataFrame(records)
 
-                filename = get_path(
+                filename = get_trade_path(
                     EXCHANGE,
                     "orderbook",
                     SYMBOL
